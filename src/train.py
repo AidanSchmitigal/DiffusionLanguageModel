@@ -16,6 +16,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenize
 
 from src.models import MODELS
 from src.mask import add_mask_token
+from src.bidirectional import make_bidirectional
 
 # Training config
 
@@ -49,3 +50,5 @@ model.to(device)
 mask_token_id = tokenizer.mask_token_id
 
 model, tokenizer, mask_id = add_mask_token(model, tokenizer)
+
+make_bidirectional(model)
