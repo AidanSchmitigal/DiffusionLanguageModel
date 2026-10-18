@@ -9,10 +9,13 @@ I have done a cursory search for resources and found these:
 - https://arxiv.org/html/2410.17891v2 | Scaling Diffusion Language Models via Adaptation from Autoregressive Models
 - https://arxiv.org/pdf/2406.07524 | Simple and Effective
   Masked Diffusion Language Models
+- https://arxiv.org/pdf/2406.04329 | Simplified and Generalized
+  Masked Diffusion for Discrete Data
 - https://arxiv.org/pdf/2502.09992 | Large Language Diffusion Models
 - https://huggingface.co/blog/ProCreations/diffusion-language-model | Diffusion Language Models: The New Paradigm
 - https://neurips.cc/virtual/2025/loc/san-diego/poster/117288 | Reinforcing the Diffusion Chain of Lateral Thought with Diffusion Language Models
 - https://huggingface.co/papers/2512.15713 | DiffusionVL: Translating Any Autoregressive Models into Diffusion Vision Language Models
+- https://arxiv.org/pdf/2310.16834 | Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution
 
 ## Models I want to try adapting:
 
@@ -22,3 +25,23 @@ I have done a cursory search for resources and found these:
 - https://huggingface.co/openai/gpt-oss-20b | GPT-OSS-20B
 
 * I know nothing about these model architectures yet. Gemma might not be possible because it has vision & audio input.
+
+## General plan
+
+I need `[MASK]` tokens to be replaced with the correct text. We run it on a full sequence and have it predict the all the masked tokens.
+
+1. **Add a `[MASK]` token.** We add noise to corrupt text by replacing tokens with `[MASK]`. All these tokenizers should have unused tokens we can use.
+2. **Let attention look right.** Remove the causal mask so every position can see the whole block.
+3. **Fine-tune on a mask-and-recover objective** (the MDLM ELBO).
+
+The removal of the causal mask needs to be done gradually. We anneal the right-context width from 0 to the full sequence length.
+
+Position `i` may attend to `j` iff `j <= i + w`:
+
+```
+w = 0          w = 2              w >= L-1
+  1 . . .       1 1 . .         1 1 1 1
+  1 1 . .       1 1 1 .         1 1 1 1
+  1 1 1 .       1 1 1 1         1 1 1 1
+   causal       local + future    fully bidirectional
+```
