@@ -6,5 +6,6 @@
   "reportUnknownArgumentType": "none",
   "reportUnusedImport": "none",
   "reportPrivateImportUsage": "none",
-  "reportPrivateUsage": "none"
+  "reportPrivateUsage": "none",
+  "reportUnusedCallResult": "none"
 }

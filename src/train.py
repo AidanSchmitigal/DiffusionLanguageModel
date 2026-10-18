@@ -34,7 +34,7 @@ with open(out / "config.json", "w") as f:
     json.dump(cfg, f, indent=2, default=str)
 
 random.seed(cfg["seed"])
-_ = torch.manual_seed(cfg["seed"])
+torch.manual_seed(cfg["seed"])
 
 device = torch.device("mps")
 print(f"Using device: {device}, dtype: {spec.dtype}")
@@ -43,7 +43,7 @@ print(f"Using device: {device}, dtype: {spec.dtype}")
 
 tokenizer = cast(PreTrainedTokenizerBase, AutoTokenizer.from_pretrained(spec.hf_id))
 model = AutoModelForCausalLM.from_pretrained(spec.hf_id, dtype=spec.dtype)
-_ = model.to(device)
+model.to(device)
 
 # Mask Token setup
 mask_token_id = tokenizer.mask_token_id
