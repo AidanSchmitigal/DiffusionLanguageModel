@@ -1,0 +1,8 @@
+{
+  "reportUnknownMemberType": false,
+  "reportArgumentType": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnusedImport": "none"
+}
