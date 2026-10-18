@@ -17,7 +17,7 @@ def benchmark_model(spec: ModelSpec, device: deviceType):
     hf_id = spec.hf_id
 
     tokenizer = cast(PreTrainedTokenizerBase, AutoTokenizer.from_pretrained(hf_id))
-    model = AutoModelForCausalLM.from_pretrained(hf_id, dtype=torch.bfloat16)
+    model = AutoModelForCausalLM.from_pretrained(hf_id, dtype=spec.dtype)
     _ = model.to(device)
 
     def generate(prompt: str, max_length: int):

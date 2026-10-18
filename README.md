@@ -45,3 +45,10 @@ w = 0          w = 2              w >= L-1
   1 1 1 .       1 1 1 1         1 1 1 1
    causal       local + future    fully bidirectional
 ```
+
+## Files:
+
+- `src/models.py`: Defines the models I want to try.
+- `src/train.py`: Training code.
+- `src/benchmark.py`: Simple get tps of a model.
+- `src/util.py`: Utility functions.

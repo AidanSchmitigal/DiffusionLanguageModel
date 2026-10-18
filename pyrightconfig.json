@@ -4,5 +4,7 @@
   "reportAttributeAccessIssue": "none",
   "reportUnknownVariableType": "none",
   "reportUnknownArgumentType": "none",
-  "reportUnusedImport": "none"
+  "reportUnusedImport": "none",
+  "reportPrivateImportUsage": "none",
+  "reportPrivateUsage": "none"
 }
