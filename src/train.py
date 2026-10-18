@@ -52,3 +52,8 @@ mask_token_id = tokenizer.mask_token_id
 model, tokenizer, mask_id = add_mask_token(model, tokenizer)
 
 make_bidirectional(model)
+
+model.config.use_cache = False
+
+n_params = sum(p.numel() for p in model.parameters())
+print(f"base: {spec.hf_id}, params: {n_params / 1e6:.1f}M, mask_id: {mask_id}")
