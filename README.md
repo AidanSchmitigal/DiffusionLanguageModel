@@ -52,3 +52,35 @@ w = 0          w = 2              w >= L-1
 - `src/train.py`: Training code.
 - `src/benchmark.py`: Simple get tps of a model.
 - `src/util.py`: Utility functions.
+- `src/config.py`: Configuration.
+- `src/data.py`: Data loading.
+- `src/mask.py`: Mask token setup.
+- `src/bidirectional.py`: Bidirectional attention.
+
+## Config
+
+Configs are in `configs/*.yaml`.
+
+## Running
+
+```bash
+python -m src.train --config configs/smollm2-135m.yaml
+```
+
+## Training models
+
+### SmolLM2-135M
+
+...
+
+### SmolLM3-3B
+
+Using `bfloat16` because otherwise it take >64 GB of memory to train. Using `float16` caused NaN loss for some reason.
+
+### GEMMA-4-E2B-it
+
+...
+
+### GPT-OSS-20B
+
+...

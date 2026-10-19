@@ -16,10 +16,8 @@ CACHE_DIR = Path("data")
 DATASET_NAME = "HuggingFaceFW/fineweb-edu"
 CONFIG_NAME = "sample-10BT"
 
-max_docs = 120_000
 
-
-def build_token_stream(tokenizer: PreTrainedTokenizerBase):
+def build_token_stream(tokenizer: PreTrainedTokenizerBase, max_docs: int):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     tag = f"{DATASET_NAME.replace('/', '_')}_{CONFIG_NAME}"
     cache = CACHE_DIR / f"stream_{tag}.pt"

@@ -20,7 +20,7 @@ MODELS: dict[str, ModelSpec] = {
     "smollm3-3b": ModelSpec(
         short_name="smollm3-3b",
         hf_id="HuggingFaceTB/SmolLM3-3B",
-        dtype=torch.float32,
+        dtype=torch.bfloat16,
     ),
     "gpt-oss-20b": ModelSpec(
         short_name="gpt-oss-20b",

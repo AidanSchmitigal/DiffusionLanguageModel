@@ -15,6 +15,8 @@ from pathlib import Path
 import random
 import time
 import math
+import argparse
+from typed_argparse import TypedArgs
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerBase, PreTrainedModel
@@ -26,9 +28,17 @@ from src.mask import add_mask_token
 from src.bidirectional import attention_mask_band, make_bidirectional
 from src.data import PackedTokenDataset, anneal_width, build_token_stream, diffusion_loss, q_sample
 
-# Training config
-cfg = Config.load("configs/smollm2-135m.yaml")
 
+class Args(TypedArgs):
+    config: str
+
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--config", type=str, required=True, help="Path to config file")
+args = Args.from_argparse(ap.parse_args())
+
+# Training config
+cfg = Config.load(args.config)
 spec = MODELS[cfg.spec]
 
 out = Path(cfg.out_dir)
@@ -64,9 +74,7 @@ print(f"base: {spec.hf_id}, params: {n_params / 1e6:.1f}M, mask_id: {mask_id}")
 
 # Training
 
-stream = build_token_stream(
-    tokenizer,
-)
+stream = build_token_stream(tokenizer, cfg.max_docs)
 dataset = PackedTokenDataset(stream, seq_len=cfg.seq_len)
 dataloader = DataLoader(
     dataset,
