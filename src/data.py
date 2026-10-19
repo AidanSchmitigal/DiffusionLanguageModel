@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 from pathlib import Path
 import os
+import random
 
 CACHE_DIR = Path("data")
 DATASET_NAME = "HuggingFaceFW/fineweb-edu"
@@ -147,3 +148,17 @@ def diffusion_loss(
         return logits.sum() * 0.0
 
     return per_example[keep].mean() / T
+
+
+def anneal_width(step: int, cfg: dict) -> float:
+    full = cfg["seq_len"] - 1
+    if cfg["anneal_steps"] <= 0:
+        return full
+
+    frac = min(1.0, step / cfg["anneal_steps"])
+    width = full * frac
+
+    if cfg["stochastic_anneal"] and frac < 1.0:
+        width = random.uniform(width / 2, width) if random.random() < 0.5 else width
+
+    return width

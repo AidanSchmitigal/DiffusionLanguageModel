@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 from src.models import MODELS
 from src.mask import add_mask_token
 from src.bidirectional import attention_mask_band, make_bidirectional
-from src.data import PackedTokenDataset, build_token_stream, diffusion_loss, q_sample
+from src.data import PackedTokenDataset, anneal_width, build_token_stream, diffusion_loss, q_sample
 
 # Training config
 
@@ -33,7 +33,8 @@ cfg = {
     "out_dir": "runs/smollm2-135m",
     "batch_size": 16,
     "steps": 20_000,
-    "anneal_steps": 1_000,
+    "anneal_steps": 2_000,
+    "stochastic_anneal": True,
     "seq_len": 256,
     "weight_decay": 0.01,
     "lr": 3e-5,
@@ -142,7 +143,7 @@ while not done:
         noise = torch.randn(x_0.shape[0], 1, device=device).clamp(min=1e-3)
         x_t, mask = q_sample(x_0, noise, mask_id)
 
-        width = 0.0
+        width = anneal_width(step, cfg)
 
         attention_mask = attention_mask_band(cfg["seq_len"], device=device, width=width)
         if attention_mask is not None:
