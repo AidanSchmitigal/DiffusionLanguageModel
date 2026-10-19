@@ -4,6 +4,7 @@ from datasets import load_dataset
 from transformers import BatchEncoding, PreTrainedTokenizerBase
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from pathlib import Path
 import os
@@ -112,3 +113,37 @@ def q_sample(x_0: torch.Tensor, noise: torch.Tensor, mask_id: int):
     # print(empty) # no false values
 
     return x_t, mask
+
+
+def diffusion_loss(
+    logits: torch.Tensor,
+    x_0: torch.Tensor,
+    mask: torch.Tensor,
+    noise: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Weighted cross-entropy on masked positions only.
+
+    logits: (B, T, V) model output.
+    x_0: (B, T) clean tokens.
+    mask: (B, T) bool, True at masked positions.
+    t: (B, 1) noise level used to build `mask`.
+
+    Returns the scalar loss normalised by B*T
+    """
+    B, T, V = logits.shape
+    ce = F.cross_entropy(
+        logits.reshape(-1, V),
+        x_0.reshape(-1),
+        reduction="none",
+    ).view(B, T)
+
+    w = mask.to(logits.dtype) / noise
+    per_example = (ce * w).sum(dim=-1)
+
+    # Examples where nothing was masked contribute nothing; drop them.
+    keep = mask.any(dim=-1)
+    if not keep.any():
+        return logits.sum() * 0.0
+
+    return per_example[keep].mean() / T
