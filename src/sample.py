@@ -11,6 +11,7 @@ from src.bidirectional import make_bidirectional
 from src.config import Config
 from src.mask import MASK_TOKEN
 from src.models import MODELS, ModelSpec
+from src.util import print_tokens
 
 
 class Args(TypedArgs):
@@ -47,7 +48,7 @@ model.config.use_cache = False
 
 model.eval()
 
-print(f"loaded {args.model} ({spec.hf_id}) mask_id={mask_id}\n")
+print(f"loaded {args.model} ({spec.hf_id}) mask_id={mask_id} ({MASK_TOKEN})\n")
 
 # De-masking steps
 
@@ -55,9 +56,12 @@ prompt = "The history of the printing press begins with"
 tokens: BatchEncoding = tokenizer(prompt, add_special_tokens=False)
 ids = cast(list[int], tokens["input_ids"])
 prompt_t = torch.tensor([ids], dtype=torch.long, device=device)
-total = len(ids)
+total_nonmasked = len(ids)
 
-x = torch.full((1, total), mask_id, dtype=torch.long, device=device)
+x = torch.full((1, args.length), mask_id, dtype=torch.long, device=device)
+x[:, : prompt_t.shape[1]] = prompt_t
+
+print("Starting", x)
 
 for step in range(args.steps):
     logits = cast(torch.Tensor, model(input_ids=x, use_cache=False).logits)
@@ -69,12 +73,11 @@ for step in range(args.steps):
     conf, pred = probs.max(dim=-1)
 
     is_mask = x == mask_id
-    conf = conf.masked_fill(is_mask, -float("inf"))
+    conf = conf.masked_fill(~is_mask, -float("inf"))
 
     _, idx = conf[0].topk(1)
 
     x[0, idx] = pred[0, idx]
 
-print(x)
-text = tokenizer.decode(x[0], skip_special_tokens=True)
-print(text.strip())
+print("Ending", x)
+print_tokens(x[0], tokenizer)

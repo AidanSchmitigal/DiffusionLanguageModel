@@ -10,7 +10,7 @@ def print_tokens(tokens: torch.LongTensor, tokenizer: PreTrainedTokenizerBase):
     num_tokens = len(tokens)
 
     for i in range(num_tokens):
-        token = tokenizer.decode(tokens[i])
+        token = tokenizer.decode(tokens[i], skip_special_tokens=True)
         token = token.replace("\n", "\\n")
         if i % 2 == 0:
             print(chalk.bg_white.white_bright(token), end="")
