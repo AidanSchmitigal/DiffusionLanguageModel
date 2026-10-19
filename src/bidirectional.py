@@ -43,7 +43,7 @@ def make_bidirectional(model: PreTrainedModel):
     for layer in model_layers:
         layer.self_attn.is_causal = False
 
-    pass
+    model.config.is_causal = False
 
 
 def attention_mask_band(

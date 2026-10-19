@@ -184,7 +184,5 @@ while not done:
             with open(out / "checkpoint" / "mask_id.txt", "w") as f:
                 f.write(str(mask_id))
 
-        break
-
 elapsed = time.time() - start
 print(f"\ndone in {elapsed / 60:.1f} min -> {out / 'checkpoint'}")
