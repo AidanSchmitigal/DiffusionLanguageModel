@@ -56,14 +56,15 @@ prompt = "The history of the printing press begins with"
 tokens: BatchEncoding = tokenizer(prompt, add_special_tokens=False)
 ids = cast(list[int], tokens["input_ids"])
 prompt_t = torch.tensor([ids], dtype=torch.long, device=device)
-total_nonmasked = len(ids)
+starting_masked = args.length - len(ids)
 
 x = torch.full((1, args.length), mask_id, dtype=torch.long, device=device)
 x[:, : prompt_t.shape[1]] = prompt_t
 
 print("Starting", x)
 
-for step in range(args.steps):
+step = 0
+for step in range(args.steps + 1):
     logits = cast(torch.Tensor, model(input_ids=x, use_cache=False).logits)
 
     logits = logits.clone()
@@ -75,9 +76,22 @@ for step in range(args.steps):
     is_mask = x == mask_id
     conf = conf.masked_fill(~is_mask, -float("inf"))
 
-    _, idx = conf[0].topk(1)
+    # only unmask a small amount at a time
+    expected_remaining_masks = max(0, int(round(starting_masked * (1.0 - step / (args.steps)))))
+    num_masked = int(is_mask[0].sum().item())
+
+    num_unmask = max(1, num_masked - expected_remaining_masks)
+
+    if num_masked == 0:
+        break
+
+    k = min(num_masked, num_unmask)
+    print(expected_remaining_masks, num_masked, num_unmask, k)
+    _, idx = conf[0].topk(k)
 
     x[0, idx] = pred[0, idx]
+
+print(f"Completed after {step} steps")
 
 print("Ending", x)
 print_tokens(x[0], tokenizer)
