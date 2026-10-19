@@ -32,6 +32,8 @@ ap.add_argument("--steps", type=int, default=48)
 ap.add_argument("--length", type=int, default=128)
 ap.add_argument("--prefix", type=str, default="")
 ap.add_argument("--suffix", type=str, default="")
+ap.add_argument("--temperature", type=float, default=0.9)
+ap.add_argument("--top_p", type=float, default=None)
 args = Args.from_argparse(ap.parse_args())
 
 device = torch.device("mps")
@@ -78,9 +80,6 @@ starting_masked = (x[0] == mask_id).sum().item()
 
 # print("Starting", x)
 
-temperature = 0.9
-top_p: float | None = None
-
 with Live(("Waiting..."), auto_refresh=False) as live:
 
     step = 0
@@ -90,9 +89,9 @@ with Live(("Waiting..."), auto_refresh=False) as live:
         logits = logits.clone()
         logits[..., mask_id] = float("-inf")
 
-        # logits = logits / temperature
+        logits = logits / args.temperature
 
-        if top_p is not None:
+        if args.top_p is not None:
             # sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
             # probs = sorted_logits.softmax(dim=-1)
             # cumulative_probs = torch.cumsum(probs, dim=-1)
@@ -130,13 +129,7 @@ with Live(("Waiting..."), auto_refresh=False) as live:
         live.update((Text.from_ansi(print_token_diff(x_before, x[0], tokenizer))))
         live.refresh()
 
-        # print(print_token_diff(x[0], x[0], tokenizer))
-        # print_tokens(x[0], tokenizer)
-
     live.update((Text.from_ansi(print_token_diff(x[0], x[0], tokenizer))))
     live.refresh()
 
 print(f"Completed after {step} steps")
-
-# print("Ending", x)
-# print_tokens(x[0], tokenizer)
