@@ -10,6 +10,7 @@ from torch.utils.data.dataloader import DataLoader
 
 
 from typing import Any, cast
+from dataclasses import asdict
 import json
 from pathlib import Path
 import random
@@ -46,7 +47,7 @@ out.mkdir(exist_ok=True, parents=True)
 log_path = out / "train_log.jsonl"
 
 with open(out / "config.json", "w") as f:
-    json.dump(cfg, f, indent=2, default=str)
+    json.dump(asdict(cfg), f, indent=2, default=str)
 
 random.seed(cfg.seed)
 torch.manual_seed(cfg.seed)
@@ -134,7 +135,7 @@ while not done:
             g["lr"] = cfg.lr * lr_at(step)
 
         # noise
-        noise = torch.randn(x_0.shape[0], 1, device=device).clamp(min=1e-3)
+        noise = torch.rand(x_0.shape[0], 1, device=device).clamp(min=1e-3, max=1.0)
         x_t, mask = q_sample(x_0, noise, mask_id)
 
         width = anneal_width(step, cfg)

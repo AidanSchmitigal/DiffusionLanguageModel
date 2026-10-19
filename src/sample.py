@@ -27,6 +27,7 @@ class Args(TypedArgs):
     temperature: float
     top_p: float | None
     viewer: bool
+    seed: int
 
 
 ap = argparse.ArgumentParser()
@@ -35,10 +36,13 @@ ap.add_argument("--steps", type=int, default=48)
 ap.add_argument("--length", type=int, default=128)
 ap.add_argument("--prefix", type=str, default="")
 ap.add_argument("--suffix", type=str, default="")
-ap.add_argument("--temperature", type=float, default=0.9)
+ap.add_argument("--temperature", type=float, default=1.0)
 ap.add_argument("--top_p", type=float, default=None)
 ap.add_argument("--viewer", action="store_true", help="Enable the interactive diffusion viewer.")
+ap.add_argument("--seed", type=int, default=0, help="Seed for sampling (only affects --top_p).")
 args = Args.from_argparse(ap.parse_args())
+
+torch.manual_seed(args.seed)
 
 device = torch.device("mps")
 
