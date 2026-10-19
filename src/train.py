@@ -20,7 +20,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerBase, PreTrainedModel
 from torch.utils.data import DataLoader
 
-from config import Config
+from src.config import Config
 from src.models import MODELS
 from src.mask import add_mask_token
 from src.bidirectional import attention_mask_band, make_bidirectional

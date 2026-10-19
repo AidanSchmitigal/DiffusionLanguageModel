@@ -10,7 +10,7 @@ from pathlib import Path
 import os
 import random
 
-from config import Config
+from src.config import Config
 
 CACHE_DIR = Path("data")
 DATASET_NAME = "HuggingFaceFW/fineweb-edu"

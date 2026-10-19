@@ -10,7 +10,7 @@ batch_size: 16
 
 # --- optimisation ---
 steps: 20_000
-lr: 3e-5
+lr: 3.0e-5
 warmup_steps: 200
 weight_decay: 0.01
 grad_clip: 1.0

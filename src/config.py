@@ -40,3 +40,14 @@ class Config:
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
         return cls.from_dict(raw)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, str]) -> "Config":
+        known = {f.name for f in fields(cls)}
+        unknown = set(raw) - known
+        if unknown:
+            raise ValueError(f"Unknown config keys: {sorted(unknown)}")
+
+        cfg = cls(**raw)
+
+        return cfg
