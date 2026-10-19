@@ -1,7 +1,8 @@
 import torch
 from transformers import PreTrainedTokenizerBase
 from yachalk import chalk
-from rich.console import Console
+from rich.console import Console, RenderableType
+from rich.table import Table
 
 
 def print_tokens(tokens: torch.LongTensor, tokenizer: PreTrainedTokenizerBase):

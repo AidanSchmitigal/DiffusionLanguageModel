@@ -68,11 +68,11 @@ python -m src.train --config configs/smollm2-135m.yaml
 ```
 
 ```bash
-python -m src.sample --model runs/smollm3-3b --length 50 --prefix "In a galaxy far, far, away" --suffix "The End." --steps 35
+python -m src.sample --model runs/smollm3-3b --length 50 --prefix "In a galaxy far, far, away" --suffix " The End." --steps 35
 
-python -m src.sample --model runs/smollm3-3b --length 25 --prefix "Water boils at" --suffix "at sea level." --steps 48
+python -m src.sample --model runs/smollm3-3b --length 25 --prefix "Water boils at" --suffix " at sea level." --steps 48
 
-python -m src.sample --model runs/smollm3-3b --length 96 --prefix "The history of the printing press begins with" --suffix "and ends, for now, with the internet." --steps 256
+python -m src.sample --model runs/smollm3-3b --length 96 --prefix "The history of the printing press begins with" --suffix " and ends, for now, with the internet." --steps 256
 ```
 
 ## Training models

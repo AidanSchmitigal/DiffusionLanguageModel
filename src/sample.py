@@ -4,13 +4,13 @@ from rich.text import Text
 from typed_argparse import TypedArgs
 from pathlib import Path
 import json
-
 from rich.live import Live
 from rich.panel import Panel
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BatchEncoding, PreTrainedTokenizerBase, PreTrainedModel
 
+from src.diffusion_view import DiffusionViewer
 from src.bidirectional import make_bidirectional
 from src.config import Config
 from src.mask import MASK_TOKEN
@@ -24,6 +24,9 @@ class Args(TypedArgs):
     length: int
     prefix: str
     suffix: str
+    temperature: float
+    top_p: float | None
+    viewer: bool
 
 
 ap = argparse.ArgumentParser()
@@ -34,6 +37,7 @@ ap.add_argument("--prefix", type=str, default="")
 ap.add_argument("--suffix", type=str, default="")
 ap.add_argument("--temperature", type=float, default=0.9)
 ap.add_argument("--top_p", type=float, default=None)
+ap.add_argument("--viewer", action="store_true", help="Enable the interactive diffusion viewer.")
 args = Args.from_argparse(ap.parse_args())
 
 device = torch.device("mps")
@@ -58,7 +62,7 @@ model.config.use_cache = False
 
 model.eval()
 
-print(f"loaded {args.model} ({spec.hf_id}) mask_id={mask_id} ({MASK_TOKEN})\n")
+print(f"loaded {args.model} ({spec.hf_id}) mask_id={mask_id} ({MASK_TOKEN})")
 
 
 # De-masking steps
@@ -78,13 +82,15 @@ x[:, -suffix_t.shape[1] :] = suffix_t
 
 starting_masked = (x[0] == mask_id).sum().item()
 
-# print("Starting", x)
 
-with Live(("Waiting..."), auto_refresh=False) as live:
+viewer = DiffusionViewer(tokenizer, mask_id, cell_width=8, topk=5)
+live = Live(("Waiting..."), auto_refresh=False)
 
+with viewer if args.viewer else live:
     step = 0
     for step in range(args.steps + 1):
-        logits = cast(torch.Tensor, model(input_ids=x, use_cache=False, attention_mask=None).logits)
+        with torch.no_grad():
+            logits = cast(torch.Tensor, model(input_ids=x, use_cache=False, attention_mask=None).logits)
 
         logits = logits.clone()
         logits[..., mask_id] = float("-inf")
@@ -93,24 +99,32 @@ with Live(("Waiting..."), auto_refresh=False) as live:
 
         if args.top_p is not None:
             # sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
-            # probs = sorted_logits.softmax(dim=-1)
-            # cumulative_probs = torch.cumsum(probs, dim=-1)
-            # remove = cumulative_probs - probs > top_p
-
-            # sorted_logits = sorted_logits.masked_fill(remove, float("-inf"))
-            # logits = sorted_logits.scatter(dim=-1, index=sorted_indices, src=sorted_logits)
-
             probs = logits.softmax(dim=-1)
-            flat_probs = probs.view(-1, probs.shape[-1])
-            indices = torch.multinomial(flat_probs, 1)
+            sorted_probs, sorted_idx = probs.sort(dim=-1, descending=True)
+            # cumulative_probs = torch.cumsum(probs, dim=-1)
+            cumulative_probs = sorted_probs.cumsum(dim=-1)
+            remove = (cumulative_probs - sorted_probs) > args.top_p
+            remove[..., 0] = False
+            sorted_probs = sorted_probs.masked_fill(remove, 0.0)
+            probs = torch.zeros_like(probs).scatter_(-1, sorted_idx, sorted_probs)
+
+            flat = probs.view(-1, probs.shape[-1])
+            flat = flat / flat.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+            indices = torch.multinomial(flat, 1)
+            norm = flat.view(*probs.shape)
             pred = indices.view(*probs.shape[:-1])
-            conf = probs.gather(-1, pred.unsqueeze(-1)).squeeze(-1)
+            conf = norm.gather(-1, pred.unsqueeze(-1)).squeeze(-1)
+            dist = norm
         else:
             probs = logits.softmax(dim=-1)
             conf, pred = probs.max(dim=-1)
+            dist = probs
 
+        conf_all = conf.clone()
         is_mask = x == mask_id
         conf = conf.masked_fill(~is_mask, -float("inf"))
+
+        score = conf + torch.rand_like(conf) * 1e-3
 
         # only unmask a small amount at a time
         expected_remaining_masks = max(0, int(round(starting_masked * (1.0 - step / (args.steps)))))
@@ -122,14 +136,18 @@ with Live(("Waiting..."), auto_refresh=False) as live:
             break
 
         k = min(num_masked, num_unmask)
-        _, idx = conf[0].topk(k)
+        _, idx = score[0].topk(k)
 
         x_before = x[0].clone()
         x[0, idx] = pred[0, idx]
+        viewer.record(step=step, before=x_before, after=x[0], pred=pred[0], conf=conf_all[0], probs=dist[0], committed=idx)
+
         live.update((Text.from_ansi(print_token_diff(x_before, x[0], tokenizer))))
         live.refresh()
 
+    viewer.finish(x[0])
+    viewer.browse(0)
     live.update((Text.from_ansi(print_token_diff(x[0], x[0], tokenizer))))
     live.refresh()
 
-print(f"Completed after {step} steps")
+print(f"Completed after {step + 1} steps")
