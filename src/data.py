@@ -10,6 +10,8 @@ from pathlib import Path
 import os
 import random
 
+from config import Config
+
 CACHE_DIR = Path("data")
 DATASET_NAME = "HuggingFaceFW/fineweb-edu"
 CONFIG_NAME = "sample-10BT"
@@ -150,15 +152,15 @@ def diffusion_loss(
     return per_example[keep].mean() / T
 
 
-def anneal_width(step: int, cfg: dict) -> float:
-    full = cfg["seq_len"] - 1
-    if cfg["anneal_steps"] <= 0:
+def anneal_width(step: int, cfg: Config) -> float:
+    full = cfg.seq_len - 1
+    if cfg.anneal_steps <= 0:
         return full
 
-    frac = min(1.0, step / cfg["anneal_steps"])
+    frac = min(1.0, step / cfg.anneal_steps)
     width = full * frac
 
-    if cfg["stochastic_anneal"] and frac < 1.0:
+    if cfg.stochastic_anneal and frac < 1.0:
         width = random.uniform(width / 2, width) if random.random() < 0.5 else width
 
     return width

@@ -11,6 +11,15 @@
       "program": "${file}",
       "console": "integratedTerminal",
       "args": "${command:pickArgs}"
+    },
+    {
+      "name": "Python Debugger: src.train",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "src.train",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }
