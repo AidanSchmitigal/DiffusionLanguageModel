@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from src.models import MODELS
 from src.mask import add_mask_token
 from src.bidirectional import make_bidirectional
-from src.data import build_token_stream, q_sample
+from src.data import PackedTokenDataset, build_token_stream, q_sample
 
 # Training config
 
@@ -32,6 +32,7 @@ cfg = {
     "batch_size": 16,
     "steps": 20_000,
     "anneal_steps": 1_000,
+    "seq_len": 256,
 }
 
 spec = MODELS[cfg["spec"]]
@@ -72,7 +73,7 @@ print(f"base: {spec.hf_id}, params: {n_params / 1e6:.1f}M, mask_id: {mask_id}")
 stream = build_token_stream(
     tokenizer,
 )
-dataset = stream
+dataset = PackedTokenDataset(stream, seq_len=cfg["seq_len"])
 dataloader = DataLoader(
     dataset,
     batch_size=cfg["batch_size"],
@@ -95,7 +96,7 @@ model.train()
 done = False
 while not done:
     for batch in dataloader:
-        print(batch)
+        print("batch.shape", batch.shape)
         x_0: torch.Tensor = cast(torch.Tensor, batch.to(device))
 
         # noise
