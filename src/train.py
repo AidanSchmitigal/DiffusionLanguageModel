@@ -61,8 +61,6 @@ model = AutoModelForCausalLM.from_pretrained(spec.hf_id, dtype=spec.dtype)
 model.to(device)
 
 # Mask Token setup
-mask_token_id = tokenizer.mask_token_id
-
 model, tokenizer, mask_id = add_mask_token(model, tokenizer)
 
 make_bidirectional(model)
@@ -79,7 +77,7 @@ dataset = PackedTokenDataset(stream, seq_len=cfg.seq_len)
 dataloader = DataLoader(
     dataset,
     batch_size=cfg.batch_size,
-    # shuffle=True,
+    shuffle=True,
     drop_last=True,
     num_workers=0,
     pin_memory=False,
@@ -132,6 +130,9 @@ while not done:
         # print("batch.shape", batch.shape)
         x_0: torch.Tensor = cast(torch.Tensor, batch.to(device))
 
+        for g in optimizer.param_groups:
+            g["lr"] = cfg.lr * lr_at(step)
+
         # noise
         noise = torch.randn(x_0.shape[0], 1, device=device).clamp(min=1e-3)
         x_t, mask = q_sample(x_0, noise, mask_id)
@@ -153,7 +154,7 @@ while not done:
         running.append(loss.item())
         step += 1
 
-        if step % cfg.log_steps == 0:
+        if step == 1 or step % cfg.log_steps == 0:
             avg = sum(running[-cfg.log_steps :]) / min(len(running), cfg.log_steps)
             el = time.time() - start
 

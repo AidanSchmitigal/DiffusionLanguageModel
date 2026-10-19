@@ -23,5 +23,5 @@ stochastic_anneal: True
 log_steps: 25
 save_steps: 500
 sample_steps: 1_000
-out_dir: "runs/default"
+out_dir: "runs/smollm2-135m"
 seed: 42
