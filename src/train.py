@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from src.models import MODELS
 from src.mask import add_mask_token
 from src.bidirectional import make_bidirectional
-from src.data import build_token_data, q_sample
+from src.data import build_token_stream, q_sample
 
 # Training config
 
@@ -69,9 +69,10 @@ print(f"base: {spec.hf_id}, params: {n_params / 1e6:.1f}M, mask_id: {mask_id}")
 
 # Training
 
-dataset = build_token_data(
+stream = build_token_stream(
     tokenizer,
 )
+dataset = stream
 dataloader = DataLoader(
     dataset,
     batch_size=cfg["batch_size"],
