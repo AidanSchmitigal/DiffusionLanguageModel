@@ -26,7 +26,6 @@ class Config:
 
     # --- attention annealing ---
     anneal_steps: int = 2_000
-    stochastic_anneal: bool = True
 
     # --- runtime ---
     log_steps: int = 25

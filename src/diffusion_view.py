@@ -9,6 +9,17 @@ Every token is a fixed-width, 3-line "stack":
     │ ██████ │  row 3: confidence of that prediction
     └────────┘
 
+When a ground-truth sample is supplied (`truth=`), a 4th row is added:
+
+    ┌────────┐
+    │  the   │  row 1: token currently in the sequence
+    │  cat   │  row 2: prediction
+    │ ██████ │  row 3: confidence
+    │  the   │  row 4: the original sample token (green = match, red = mismatch)
+    └────────┘
+
+The header then reports how much of the original sample the model reproduced.
+
 Cell colour is the diff against the previous step:
     MASK     still masked
     NEW      mask -> token on this step
@@ -189,13 +200,16 @@ class DiffusionViewer:
     """
     Use as a context manager around the sampling loop:
 
-        with DiffusionViewer(tokenizer, mask_id, pause=True) as viewer:
+        with DiffusionViewer(tokenizer, mask_id) as viewer:
             for step in ...:
                 ...
                 if not viewer.record(...):
                     break
             viewer.finish(x[0])
             viewer.browse()
+
+    Pass `truth=<token ids>` to also show the original sample text (row 4 of
+    each cell) and the percentage of it the model reproduced.
     """
 
     def __init__(
@@ -205,6 +219,7 @@ class DiffusionViewer:
         *,
         cell_width: int = 8,
         topk: int = 5,
+        truth: "torch.Tensor | list[int] | None" = None,
         console: Console | None = None,
     ) -> None:
         self.tokenizer = tokenizer
@@ -212,6 +227,20 @@ class DiffusionViewer:
         self.cell_width = max(4, cell_width)
         self.topk = max(2, topk)
         self.console = console or Console()
+
+        # Ground truth: the original (un-noised) sample text, one id per position.
+        # None means there is nothing to compare against (prefix/suffix mode).
+        if truth is None:
+            self.truth: list[int] | None = None
+        else:
+            raw = truth.tolist() if hasattr(truth, "tolist") else list(truth)
+            flat: list[int] = []
+            for item in raw:  # accept [L] and [1, L]
+                if isinstance(item, (list, tuple)):
+                    flat.extend(int(t) for t in item)
+                else:
+                    flat.append(int(item))
+            self.truth = flat
 
         self.frames: list[Frame] = []
         self.index = 0
@@ -364,6 +393,34 @@ class DiffusionViewer:
             return State.NEW
         return State.CHANGED if f.before[i] != f.after[i] else State.KEPT
 
+    # ---- ground truth ----------------------------------------------------- #
+    def _score(self, f: Frame) -> tuple[int, int, int]:
+        """(correct, resolved, total) of the committed tokens against the original sample."""
+        if self.truth is None:
+            return (0, 0, 0)
+        total = min(len(self.truth), len(f.after))
+        correct = resolved = 0
+        for i in range(total):
+            if f.after[i] == self.mask_id:
+                continue
+            resolved += 1
+            if f.after[i] == self.truth[i]:
+                correct += 1
+        return (correct, resolved, total)
+
+    def _truth_cell(self, f: Frame, i: int, look: Look) -> tuple[str, str]:
+        """The 4th row: the original sample token at position i, plus its verdict."""
+        assert self.truth is not None
+        if i >= len(self.truth):
+            return ("", f"dim on {look.sub_bg}")
+        truth = self.truth[i]
+        cur = f.after[i]
+        if cur == self.mask_id:
+            return (self._esc(truth), f"dim on {look.sub_bg}")
+        if cur == truth:
+            return (self._esc(truth), f"bold #3fb950 on {look.sub_bg}")
+        return (self._esc(truth), f"bold #e5534b on {look.sub_bg}")
+
     # ---- rendering -------------------------------------------------------- #
     def _render(self):
         if not self.frames:
@@ -376,9 +433,10 @@ class DiffusionViewer:
         cols = max(1, (size.width - gutter) // (W + 1))
         self._cols = cols
 
-        chrome = self.topk + 8  # header, legend, spacer, panel, footer
+        chrome = self.topk + 8 + (2 if self.truth is not None else 0)  # header, legend, match, spacer, panel, footer
+        H = 5 if self.truth is not None else 4  # visual lines per cell
         rows_total = math.ceil(L / cols)
-        rows_vis = max(1, min(rows_total, (size.height - chrome) // 4))
+        rows_vis = max(1, min(rows_total, (size.height - chrome) // H))
 
         cur_row = self.cursor // cols
         self._scroll = min(self._scroll, max(0, rows_total - rows_vis))
@@ -387,14 +445,14 @@ class DiffusionViewer:
         elif cur_row >= self._scroll + rows_vis:
             self._scroll = cur_row - rows_vis + 1
 
-        lines = [Text(no_wrap=True, overflow="crop") for _ in range(rows_vis * 4)]
+        lines: list[Text] = []
         for r in range(rows_vis):
             start = (self._scroll + r) * cols
-            m, a, b, c = lines[r * 4 : r * 4 + 4]
-            m.append(" " * gutter)
-            a.append(str(start).rjust(gutter - 1) + " ", style="dim")
-            b.append(" " * gutter)
-            c.append(" " * gutter)
+            row_lines = [Text(no_wrap=True, overflow="crop") for _ in range(H)]
+            row_lines[0].append(" " * gutter)
+            row_lines[1].append(str(start).rjust(gutter - 1) + " ", style="dim")
+            for k in range(2, H):
+                row_lines[k].append(" " * gutter)
 
             for col in range(cols):
                 i = start + col
@@ -409,16 +467,23 @@ class DiffusionViewer:
                 disagree = state in (State.KEPT, State.CHANGED) and prd != cur
                 pred_fg = DISAGREE_FG if disagree else look.sub_fg
 
-                m.append(_fit("▼" if i == self.cursor else "", W), style="bold #ffd166")
-                a.append(_fit(top, W), style=f"{look.fg} on {bg}")
-                b.append(_fit(self._esc(prd), W), style=f"{'italic ' if disagree else ''}{pred_fg} on {look.sub_bg}")
-                c.append(_bar(f.conf[i], W), style=f"{_conf_color(f.conf[i])} on {look.sub_bg}")
-                for line in (m, a, b, c):
+                cells: list[tuple[str, str]] = [
+                    ("▼" if i == self.cursor else "", "bold #ffd166"),
+                    (top, f"{look.fg} on {bg}"),
+                    (self._esc(prd), f"{'italic ' if disagree else ''}{pred_fg} on {look.sub_bg}"),
+                    (_bar(f.conf[i], W), f"{_conf_color(f.conf[i])} on {look.sub_bg}"),
+                ]
+                if self.truth is not None:
+                    cells.append(self._truth_cell(f, i, look))
+                for line, (txt, style) in zip(row_lines, cells):
+                    line.append(_fit(txt, W), style=style)
                     line.append(" ")
+            lines.extend(row_lines)
 
         return Group(
             self._header(f),
             self._legend(),
+            *([self._match_line(f)] if self.truth is not None else []),
             Text(""),
             Text("\n").join(lines),
             self._detail(f),
@@ -438,15 +503,38 @@ class DiffusionViewer:
             ("■ done", "green") if self._done else ("▶ generating", "yellow"),
         )
 
+    def _match_line(self, f: Frame) -> Text | None:
+        """How much of the original sample the model has reproduced so far."""
+        if self.truth is None:
+            return None
+        correct, resolved, total = self._score(f)
+        pct = (correct / resolved * 100) if resolved else 0.0
+        t = Text.assemble(
+            ("match ", "dim"),
+            (f"{pct:.1f}%", "bold cyan"),
+            (f"   {correct}/{total} correct", "dim"),
+        )
+        if total - resolved:
+            t.append(f"   {total - resolved} still masked", "dim yellow")
+        t.append("   row 4 = original sample: ", "dim")
+        t.append("green = match", "#3fb950")
+        t.append(", ", "dim")
+        t.append("red = mismatch", "#e5534b")
+        t.no_wrap = True
+        t.overflow = "crop"
+        return t
+
     def _legend(self) -> Text:
         t = Text(no_wrap=True, overflow="crop")
         for st in State:
             look = PALETTE[st]
             t.append(f" {st.value} ", style=f"{look.fg} on {look.bg[0]}")
             t.append(" ")
-        t.append("  row 1 token · row 2 prediction (", style="dim")
+        t.append("  1 token · 2 pred (", style="dim")
         t.append("yellow", style=DISAGREE_FG)
-        t.append(" = model disagrees) · row 3 confidence", style="dim")
+        t.append(" = disagrees) · 3 conf", style="dim")
+        if self.truth is not None:
+            t.append(" · 4 sample", style="dim")
         return t
 
     def _footer(self) -> Text:
@@ -461,7 +549,7 @@ class DiffusionViewer:
         k, i = self.topk, self.cursor
         state = self._state(f, i)
         look = PALETTE[state]
-        height = k + 2
+        height = k + 2 + (1 if self.truth is not None else 0)
 
         # left: step summary -------------------------------------------------
         left: list[Text] = [
@@ -495,6 +583,15 @@ class DiffusionViewer:
             head,
             Text.assemble(("pred ", "dim"), (self._esc(f.pred[i]), "bold"), (f"   p={f.conf[i]:.3f}", _conf_color(f.conf[i]))),
         ]
+        if self.truth is not None and i < len(self.truth):
+            truth = self.truth[i]
+            if f.after[i] == self.mask_id:
+                verdict = ("  pending", "dim")
+            elif f.after[i] == truth:
+                verdict = ("  ✓ match", "bold #3fb950")
+            else:
+                verdict = ("  ✗ mismatch", "bold #e5534b")
+            right.append(Text.assemble(("truth ", "dim"), (self._esc(truth), "bold"), verdict))
         if f.topk_ids is None or f.topk_probs is None:
             right.append(Text("no distribution for the final state", style="dim"))
         else:
@@ -558,8 +655,11 @@ def _demo() -> None:
             return "".join(words[i % len(words)] for i in ids)
 
     L, V, steps, mask_id = 150, 64, 12, 0
+    # a fake "original sample" to compare against (row 4 of each cell)
+    truth = [(i * 7 + 3) % 21 + 1 for i in range(L)]
     x = torch.full((L,), mask_id)
-    with DiffusionViewer(Tok(), mask_id, pause="--live" not in sys.argv) as viewer:  # type: ignore[arg-type]
+    pause = "--live" not in sys.argv
+    with DiffusionViewer(Tok(), mask_id, truth=truth) as viewer:
         for step in range(steps):
             probs = torch.rand(L, V) ** 6
             probs[:, mask_id] = 0
@@ -571,9 +671,11 @@ def _demo() -> None:
             _, idx = conf.masked_fill(~is_mask, -1).topk(k)
             before = x.clone()
             x[idx] = pred[idx]
+            # let a few positions land on the truth so the demo shows both verdicts
+            x[::11] = torch.tensor(truth[::11])
             if not viewer.record(step=step, before=before, after=x, pred=pred, conf=conf, probs=probs, committed=idx):
                 break
-            if viewer.pause is False:
+            if pause:
                 import time
 
                 time.sleep(0.3)

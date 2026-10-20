@@ -61,7 +61,11 @@ def attention_mask_band(
     if width <= 0:
         return torch.ones(seq_len, seq_len, dtype=torch.bool, device=device).tril(diagonal=0)
 
-    # keep the block of right context covering
-    # `width / seq_len` of positions, so w is a fraction of the sequence.
-    keep = int(math.ceil(width)) if width >= 1 else 1
-    return torch.ones(seq_len, seq_len, dtype=torch.bool, device=device).tril(diagonal=keep)
+    keep = int(max(0, math.floor(width)))
+    thick_diagonal = torch.ones(seq_len, seq_len, dtype=torch.bool, device=device).tril(diagonal=keep)
+
+    randoms = torch.rand_like(thick_diagonal, dtype=torch.float32)
+    sets = randoms < width / seq_len
+    thick_diagonal[sets] = True
+
+    return thick_diagonal

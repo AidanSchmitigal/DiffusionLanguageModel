@@ -50,6 +50,8 @@ w = 0          w = 2              w >= L-1
 
 - `src/models.py`: Defines the models I want to try.
 - `src/train.py`: Training code.
+- `src/sample.py`: Sampling from a checkpoint.
+- `src/diffusion_view.py`: Interactive terminal viewer for the denoising steps.
 - `src/benchmark.py`: Simple get tps of a model.
 - `src/util.py`: Utility functions.
 - `src/config.py`: Configuration.
@@ -74,6 +76,32 @@ python -m src.sample --model runs/smollm3-3b --length 25 --prefix "Water boils a
 
 python -m src.sample --model runs/smollm3-3b --length 96 --prefix "The history of the printing press begins with" --suffix " and ends, for now, with the internet." --steps 256
 ```
+
+### Viewer
+
+`--viewer` opens an interactive trace of the denoising process. Every token is a
+stack of rows:
+
+```
+│  the   │  row 1: the token currently in the sequence
+│  cat   │  row 2: what the model predicts for that position at this step
+│ ██████ │  row 3: confidence of that prediction
+│  the   │  row 4: the original sample token (green = match, red = mismatch)
+```
+
+Row 4 is only shown when there is a ground truth to compare against, i.e. when
+`--noise-sample` is used. The line under the header then reports how much of
+the original sample the model reproduced (`match 90.9%  20/22 correct`).
+
+```bash
+python -m src.sample --model runs/smollm3-3b --viewer \
+  --noise-sample "The history of the printing press begins with Gutenberg in Mainz and ends, for now, with the internet." \
+  --noise-amount 0.3 --length 48 --steps 24
+```
+
+Keys: `←/→` previous/next step, `↑/↓` move the cursor one row, `,`/`.` one
+token, `f` jump to the next token filled on this step, `g`/`G` first/last step,
+`q` quit. Every step is recorded, so you can walk backwards and forwards.
 
 ## Training models
 

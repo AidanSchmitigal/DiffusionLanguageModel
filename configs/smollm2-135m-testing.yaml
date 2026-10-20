@@ -1,0 +1,26 @@
+# --- model ---
+spec: "smollm2-135m"
+
+# --- data ---
+dataset: "HuggingFaceFW/fineweb-edu"
+dataset_config: "sample-10BT"
+seq_len: 256
+max_docs: 120_000
+batch_size: 16
+
+# --- optimisation ---
+steps: 100
+lr: 2.0e-4
+warmup_steps: 400
+weight_decay: 0.01
+grad_clip: 1.0
+
+# --- attention annealing ---
+anneal_steps: 4_000
+
+# --- runtime ---
+log_steps: 25
+save_steps: 500
+sample_steps: 1_000
+out_dir: "runs/smollm2-135m"
+seed: 0

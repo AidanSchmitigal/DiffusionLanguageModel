@@ -28,6 +28,8 @@ class Args(TypedArgs):
     top_p: float | None
     viewer: bool
     seed: int
+    noise_sample: str
+    noise_amount: float
 
 
 ap = argparse.ArgumentParser()
@@ -36,6 +38,8 @@ ap.add_argument("--steps", type=int, default=48)
 ap.add_argument("--length", type=int, default=128)
 ap.add_argument("--prefix", type=str, default="")
 ap.add_argument("--suffix", type=str, default="")
+ap.add_argument("--noise-sample", type=str, default="")
+ap.add_argument("--noise-amount", type=float, default=0.25)
 ap.add_argument("--temperature", type=float, default=1.0)
 ap.add_argument("--top_p", type=float, default=None)
 ap.add_argument("--viewer", action="store_true", help="Enable the interactive diffusion viewer.")
@@ -77,17 +81,35 @@ def token_tensor(text: str) -> torch.Tensor:
     return t
 
 
-prefix_t = token_tensor(args.prefix)
-suffix_t = token_tensor(args.suffix)
-
 x = torch.full((1, args.length), mask_id, dtype=torch.long, device=device)
-x[:, : prefix_t.shape[1]] = prefix_t
-x[:, -suffix_t.shape[1] :] = suffix_t
+bos = torch.tensor([[tokenizer.bos_token_id]], dtype=torch.long).to(device)
+
+truth: torch.Tensor | None = None
+
+if args.noise_sample:
+    truth = token_tensor(args.noise_sample)
+    truth = torch.cat([bos, truth], dim=1)
+
+    sample = truth.clone()
+    noise = torch.rand_like(sample, dtype=torch.float32)
+    masks = noise < args.noise_amount
+    sample[masks] = mask_id
+
+    set_length = min(args.length, sample.shape[1])
+    x[:, :set_length] = sample[:, :set_length]
+else:
+    prefix_t = token_tensor(args.prefix)
+    suffix_t = token_tensor(args.suffix)
+
+    prefix_t = torch.cat([bos, prefix_t], dim=1)
+
+    x[:, : prefix_t.shape[1]] = prefix_t
+    x[:, -suffix_t.shape[1] :] = suffix_t
 
 starting_masked = (x[0] == mask_id).sum().item()
 
 
-viewer = DiffusionViewer(tokenizer, mask_id, cell_width=8, topk=5)
+viewer = DiffusionViewer(tokenizer, mask_id, cell_width=8, topk=5, truth=truth)
 live = Live(("Waiting..."), auto_refresh=False)
 
 with viewer if args.viewer else live:
@@ -125,9 +147,10 @@ with viewer if args.viewer else live:
             dist = probs
 
         conf_all = conf.clone()
-        is_mask = x == mask_id
-        conf = conf.masked_fill(~is_mask, -float("inf"))
+        x_shift = x[:, 1:]
+        is_mask = x_shift == mask_id
 
+        conf = conf[:, :-1].masked_fill(~is_mask, -float("inf"))
         score = conf + torch.rand_like(conf) * 1e-3
 
         # only unmask a small amount at a time
@@ -143,15 +166,16 @@ with viewer if args.viewer else live:
         _, idx = score[0].topk(k)
 
         x_before = x[0].clone()
-        x[0, idx] = pred[0, idx]
-        viewer.record(step=step, before=x_before, after=x[0], pred=pred[0], conf=conf_all[0], probs=dist[0], committed=idx)
+        x[0, idx + 1] = pred[0, idx]
+        viewer.record(step=step, before=x_before, after=x[0], pred=pred[0].roll(1), conf=conf_all[0], probs=dist[0], committed=idx + 1)
 
         live.update((Text.from_ansi(print_token_diff(x_before, x[0], tokenizer))))
         live.refresh()
 
     viewer.finish(x[0])
-    viewer.browse(0)
+    viewer.browse()
     live.update((Text.from_ansi(print_token_diff(x[0], x[0], tokenizer))))
     live.refresh()
+
 
 print(f"Completed after {step + 1} steps")

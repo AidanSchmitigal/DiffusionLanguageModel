@@ -9,15 +9,14 @@ max_docs: 120_000
 batch_size: 16
 
 # --- optimisation ---
-steps: 16_000
+steps: 160_000
 lr: 2.0e-4
-warmup_steps: 400
+warmup_steps: 800
 weight_decay: 0.01
 grad_clip: 1.0
 
 # --- attention annealing ---
-anneal_steps: 4_000
-stochastic_anneal: True
+anneal_steps: 8_000
 
 # --- runtime ---
 log_steps: 25

@@ -73,7 +73,7 @@ print(f"base: {spec.hf_id}, params: {n_params / 1e6:.1f}M, mask_id: {mask_id}")
 
 # Training
 
-stream = build_token_stream(tokenizer, cfg.max_docs)
+stream = build_token_stream(tokenizer, cfg)
 dataset = PackedTokenDataset(stream, seq_len=cfg.seq_len)
 dataloader = DataLoader(
     dataset,

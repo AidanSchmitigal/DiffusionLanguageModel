@@ -13,25 +13,23 @@ import random
 from src.config import Config
 
 CACHE_DIR = Path("data")
-DATASET_NAME = "HuggingFaceFW/fineweb-edu"
-CONFIG_NAME = "sample-10BT"
 
 
-def build_token_stream(tokenizer: PreTrainedTokenizerBase, max_docs: int):
+def build_token_stream(tokenizer: PreTrainedTokenizerBase, cfg: Config):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    tag = f"{DATASET_NAME.replace('/', '_')}_{CONFIG_NAME}"
+    tag = f"{cfg.dataset.replace('/', '_')}_{cfg.dataset_config}"
     cache = CACHE_DIR / f"stream_{tag}.pt"
 
     if cache.exists():
         print(f"Loading cached stream from {cache}")
         return torch.load(cache)
 
-    dataset = load_dataset(DATASET_NAME, name=CONFIG_NAME, split="train", streaming=True)
+    dataset = load_dataset(cfg.dataset, name=cfg.dataset_config, split="train", streaming=True)
 
     texts = []
 
     for row in dataset:
-        if len(texts) >= max_docs:
+        if len(texts) >= cfg.max_docs:
             break
 
         text = row["text"]
@@ -93,25 +91,15 @@ def q_sample(x_0: torch.Tensor, noise: torch.Tensor, mask_id: int):
     noise: batch, 1
     """
 
-    # print("x_0.shape", x_0.shape)
-    # print("noise.shape", noise.shape)
-
     rand = torch.rand_like(x_0, dtype=torch.float32)
     mask = rand < noise
-    # print(rand)
-    # print(mask)
 
-    # empty = ~mask.any(dim=-1, keepdim=True)
-    # print(empty)  # can have False values
-
+    # put one mask in every sample
     min_indices = rand.argmin(dim=1, keepdim=True)
     mask = mask.scatter(dim=1, index=min_indices, value=True)
 
     x_t = x_0.clone()
     x_t[mask] = mask_id
-
-    # empty = ~mask.any(dim=-1, keepdim=True)
-    # print(empty) # no false values
 
     return x_t, mask
 
@@ -124,30 +112,30 @@ def diffusion_loss(
 ) -> torch.Tensor:
     """
     Weighted cross-entropy on masked positions only.
+    The loss is a sum over masked positions of CE/t
+    Shifts the logits right 1
 
     logits: (B, T, V) model output.
     x_0: (B, T) clean tokens.
     mask: (B, T) bool, True at masked positions.
     t: (B, 1) noise level used to build `mask`.
-
-    Returns the scalar loss normalised by B*T
     """
-    B, T, V = logits.shape
+
+    shift_logits = logits[:, :-1, :]
+    shift_x_0 = x_0[:, 1:]
+    shift_mask = mask[:, 1:]
+
+    B, T, V = shift_logits.shape
+
     ce = F.cross_entropy(
-        logits.reshape(-1, V),
-        x_0.reshape(-1),
+        shift_logits.reshape(-1, V),
+        shift_x_0.reshape(-1),
         reduction="none",
     ).view(B, T)
 
-    w = mask.to(logits.dtype) / noise
-    per_example = (ce * w).sum(dim=-1)
+    masked_ce = ce.masked_fill(~shift_mask, 0.0)
 
-    # Examples where nothing was masked contribute nothing; drop them.
-    keep = mask.any(dim=-1)
-    if not keep.any():
-        return logits.sum() * 0.0
-
-    return per_example[keep].mean() / T
+    return (masked_ce.sum(dim=-1, keepdim=True) / noise).sum() / shift_mask.sum()
 
 
 def anneal_width(step: int, cfg: Config) -> float:
@@ -157,8 +145,5 @@ def anneal_width(step: int, cfg: Config) -> float:
 
     frac = min(1.0, step / cfg.anneal_steps)
     width = full * frac
-
-    if cfg.stochastic_anneal and frac < 1.0:
-        width = random.uniform(width / 2, width) if random.random() < 0.5 else width
 
     return width

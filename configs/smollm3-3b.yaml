@@ -17,7 +17,6 @@ grad_clip: 1.0
 
 # --- attention annealing ---
 anneal_steps: 225 # 15% of steps
-stochastic_anneal: true
 
 # --- runtime ---
 log_steps: 25
