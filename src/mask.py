@@ -32,6 +32,6 @@ def add_mask_token(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase) -
         emb = weight[:-1].mean(dim=0)
         weight[-1].copy_(emb)
 
-    # TODO: gemini says I need to set the LM head here but it depends on the model. Check back if it doesn't work
+    # TODO: Smollm2 & Smollm3 have tied embeddings. Other models might need to set the head embeddings too.
 
     return model, tokenizer, mask_id
