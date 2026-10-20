@@ -6,7 +6,8 @@ I don't necessarily have performance metrics in mind, but I think I'll start by 
 
 I have done a cursory search for resources and found these:
 
-- https://arxiv.org/html/2410.17891v2 | Scaling Diffusion Language Models via Adaptation from Autoregressive Models
+- https://arxiv.org/html/2410.17891v2 | Scaling Diffusion Language Models via Adaptation from Autoregressive Models (most referenced paper)
+- https://arxiv.org/html/2509.26328 | Fast-dLLM v2: Efficient Block-Diffusion LLM (used for block level implementation)
 - https://arxiv.org/pdf/2406.07524 | Simple and Effective
   Masked Diffusion Language Models
 - https://arxiv.org/pdf/2406.04329 | Simplified and Generalized
