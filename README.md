@@ -7,7 +7,7 @@ I don't necessarily have performance metrics in mind, but I think I'll start by 
 I have done a cursory search for resources and found these:
 
 - https://arxiv.org/html/2410.17891v2 | Scaling Diffusion Language Models via Adaptation from Autoregressive Models (most referenced paper)
-- https://arxiv.org/html/2509.26328 | Fast-dLLM v2: Efficient Block-Diffusion LLM (used for block level implementation)
+- https://arxiv.org/html/2509.26328 | Fast-dLLM v2: Efficient Block-Diffusion LLM (unused so far)
 - https://arxiv.org/pdf/2406.07524 | Simple and Effective
   Masked Diffusion Language Models
 - https://arxiv.org/pdf/2406.04329 | Simplified and Generalized
@@ -108,79 +108,91 @@ token, `f` jump to the next token filled on this step, `g`/`G` first/last step,
 
 ### SmolLM2-135M
 
-**16,000 steps, 65.5M tokens, 7.5h on M1 Max**
+**22,850 steps, 93.6M tokens, 11.0h on M1 Max**
 
-~2,400 tok/s. Uses fineweb-edu
+~2,360 tok/s. Uses fineweb-edu. Target was 160,000 steps, which would have
+taken ~66 more hours.
 
-Training loss fell **9.76 -> 4.27**.
+#### The plateau
 
-| steps | 1-1k  | 1-2k  | 2-3k  | 3-4k  | 4-6k  | 6-8k  | 8-10k | 10-12k | 12-14k | 14-16k |
-| ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ------ | ------ | ------ |
-| loss  | 5.427 | 4.588 | 4.541 | 4.504 | 4.517 | 4.502 | 4.469 | 4.442  | 4.417  | 4.407  |
+Training loss went **14.96 -> 9.31**.
 
-The curve bends into a plateau by step 2,000 and the last 12,000 steps move the block mean from 4.504 to 4.407 (2%). Didn't learn much. I left it overnight for nothing.
+| steps | 0-2k  | 2-4k | 4-6k | 6-8k | 8-10k | 10-12k | 12-14k | 14-16k | 16-18k | 18-20k | 20-22k | 22-24k |
+| ----- | ----- | ---- | ---- | ---- | ----- | ------ | ------ | ------ | ------ | ------ | ------ | ------ |
+| loss  | 10.24 | 9.95 | 9.73 | 9.41 | 9.32  | 9.31   | 9.36   | 9.33   | 9.37   | 9.35   | 9.34   | 9.31   |
 
-average cross-entropy loss by noise level:
+| step     | t=0.01 | t=0.05 | t=0.1 | t=0.2 | t=0.5 | t=1.0 |
+| -------- | ------ | ------ | ----- | ----- | ----- | ----- |
+| 0 (ckpt) | 2.084  | 2.953  | 2.871 | 2.937 | 4.270 | 7.605 |
+| 200      | 3.087  | 2.843  | 2.700 | 3.018 | 4.249 | 7.602 |
+| 400      | 2.068  | 2.455  | 2.516 | 3.044 | 4.266 | 7.590 |
+| 600      | 2.141  | 2.681  | 2.784 | 2.941 | 4.213 | 7.596 |
 
-| t          | mean CE | share of the reported loss |
-| ---------- | ------- | -------------------------- |
-| 0 - 0.1    | 2.18    | 5%                         |
-| 0.1 - 0.25 | 2.63    | 9%                         |
-| 0.25 - 0.5 | 3.58    | 21%                        |
-| 0.5 - 1.0  | 5.70    | 65%                        |
+| t bucket | % of samples | % of reported loss | change in reported loss |
+| -------- | ------------ | ------------------ | ----------------------- |
+| 0.0-0.1  | 9.5%         | 5.4%               | -0.022                  |
+| 0.1-0.25 | 14.9%        | 9.6%               | -0.032                  |
+| 0.25-0.5 | 25.3%        | 21.1%              | -0.052                  |
+| 0.5-1.0  | 50.2%        | 63.9%              | -0.099                  |
 
-86% of the loss comes from `t > 0.25`, where most tokens are masked and the best the model can do is roughly the unigram distribution. It is trying to guess a token out of a 0 prior noisy distrobution.
+Comparing against the _causal_ SmolLM2-135M base on held-out blocks (last 5%
+of the stream, never trained on). The AR model's next-token CE is **2.936
+nats**.
 
-Comparing against the _causal_ SmolLM2-135M base on held-out blocks (last 5% of the stream, never trained on). The AR model's next-token CE is **2.934 nats**.
+| t    | AR base CE | diffusion CE | ppl  | top-1 | vs AR     |
+| ---- | ---------- | ------------ | ---- | ----- | --------- |
+| 0.01 | 2.936      | 2.455        | 11.7 | 56.0% | **-0.48** |
+| 0.02 | 2.936      | 2.489        | 12.1 | 57.9% | **-0.45** |
+| 0.05 | 2.936      | 2.576        | 13.1 | 55.3% | **-0.36** |
+| 0.10 | 2.936      | 2.750        | 15.6 | 53.1% | **-0.19** |
+| 0.20 | 2.936      | 3.073        | 21.6 | 48.7% | +0.14     |
+| 0.30 | 2.936      | 3.479        | 32.4 | 43.6% | +0.54     |
+| 0.50 | 2.936      | 4.364        | 78.6 | 32.1% | +1.43     |
+| 0.70 | 2.936      | 5.489        | 242  | 19.9% | +2.55     |
+| 0.90 | 2.936      | 6.735        | 841  | 8.8%  | +3.80     |
+| 1.00 | 2.936      | 7.583        | 1965 | 3.7%  | +4.65     |
 
-| t    | AR base CE | diffusion CE | ppl  | vs AR     |
-| ---- | ---------- | ------------ | ---- | --------- |
-| 0.01 | 2.934      | 2.200        | 9.0  | **-0.73** |
-| 0.02 | 2.934      | 2.079        | 8.0  | **-0.86** |
-| 0.05 | 2.934      | 2.179        | 8.8  | **-0.76** |
-| 0.10 | 2.934      | 2.358        | 10.6 | **-0.58** |
-| 0.20 | 2.934      | 2.693        | 14.8 | **-0.24** |
-| 0.30 | 2.934      | 3.224        | 25.1 | +0.29     |
-| 0.50 | 2.934      | 4.176        | 65.1 | +1.24     |
-| 1.00 | 2.934      | 7.545        | 1891 | +4.61     |
+The diffusion model beats the AR model at every `t < ~0.15`, which is
+exactly what it should do, because it can see context on both sides. It
+crosses over around `t = 0.15` and degrades from there.
 
-The diffusion model beats the AR model at every `t < ~0.25`, which is exactly what it should do, because it can see context on both sides. It crosses over around `t = 0.25` and degrades from there.
-
-For reference, one of my early training runs that only went for 1,500 steps was _worse than AR at every `t`_: 4.267 at `t=0.05` vs 2.179 now.
+#### Samples
 
 ```
 prefix: Water boils at          suffix: at sea level.
-temp 1.0, length 40, --steps 48 (33 masked tokens -> 34 iterations):
+temp 1.0, length 40, --steps 48 (32 masked tokens -> 33 iterations):
 
-  [prefix] 273 degrees Fahrenheit, but it is not at sea level. The temperature
-  is the amount of the water at sea. The temperature is the amount of
-  water[suffix]
+  [prefix] the bottom of the ocean. The water is the volume
+  of water in the ocean. The water is the volume of water. The water is the
+  volume of water at sea level.[suffix]
 ```
 
 ```
 prefix: The history of the printing press begins with
 suffix: and ends, for now, with the internet.
-temp 1.0, length 96, --steps 256 (78 masked tokens -> 79 iterations):
+temp 1.0, length 96, --steps 256 (77 masked tokens -> 78 iterations):
 
-  [prefix] the invention of the printing press in 1520. It was the first
-  mass-scale printing press, and it was the first mass-scale printing press to
-  be used.\nThe printing press is a printing device that uses a press to make
-  a copy of a printed page. It is used to make printed books, printed
-  newspapers, and other printed materials. The printing press,[suffix]
+  [prefix] the history of the first press of the world. The first history of
+  the printing press was the history of the first press. The history of the
+  first press was the history of the first press. The history of the first
+  press is the history of the first press. The history of the first press was
+  the history of the first press. The history of the first press is the
+  history, and ends, for now, with the internet.[suffix]
 ```
-
-Grammatically coherent, but factually wrong, which is what you would expect from a 135M model. The failure mode is repetition.
 
 ```
 prefix: In a galaxy far, far, away          suffix: The End.
-temp 1.0, length 80, --steps 60 (69 masked tokens -> 61 iterations):
+temp 1.0, length 80, --steps 60 (68 masked tokens -> 61 iterations):
 
-  [prefix], the rest of the universe is expanding.\nThe universe is
-  expanding.\nThe universe is expanding.\nThe universe is expanding.\nThe
-  universe is expanding.\nThe universe is expanding.\nThe universe is
-  expanding.\nThe universe is expanding.\nThe universe is expanding.\nThe
-  universe is expanding.\nThe universe is expanding.[suffix]
+  [prefix], in the middle of a galaxy, there is
+  the end to the end from the end to the end. The end end to the end. The end
+  end to the end. The end end to the end. End from the end to the end.. The
+  end to the end. End to the end. End to the end. The End.[suffix]
 ```
+
+The repetition failure mode is worse than the 16k run's, and the printing
+press example has collapsed into a loop. Compare the 3B samples below: the
+same architecture family at 3B holds facts together, the 135M does not.
 
 ### SmolLM3-3B
 
@@ -206,8 +218,8 @@ temp 1.0, length 40, --steps 48 (33 masked tokens -> 34 iterations):
 
   [prefix] 100 degrees Celsius at sea level.\nPressure increases with
   altitude.\nWater pressure decreases with altitude.\nWater pressure increases
-  with altitude.\nWater pressure decreases with altitude as water
-  boils[suffix]
+  with altitude.\nWater pressure decreases with altitude as water boils at sea
+level.[suffix]
 ```
 
 ```
@@ -215,12 +227,22 @@ prefix: The history of the printing press begins with
 suffix: and ends, for now, with the internet.
 temp 1.0, length 96, --steps 256 (78 masked tokens -> 79 iterations):
 
-  [prefix] the invention of movable type printing in China.The
-  history of the printing press begins with the invention of movable type
-  printing in China. It was invented by Bi Sheng in 1041.The history
-  of the printing press begins with the invention of movable type printing in
-  China. It was invented by Bi Sheng in 1041.\nThe history of the printing
-  press began here,[suffix]
+  [prefix] the invention of movable type
+  printing in China.<|im_end|>The history of the printing press begins with
+  the invention of movable type printing in China. It was invented by Bi Sh
+  eng in 1041.<|im_end|>The history of the printing press begins with the
+  invention of movable type printing in China. It was invented by Bi Sheng in
+  1041.\nThe history of the printing press began here, and ends, for now, with
+  the internet.[suffix]
+```
+
+```
+prefix: In a galaxy far, far, away          suffix: The End.
+temp 1.0, length 50, --steps 35 (39 masked tokens -> 36 iterations):
+
+  [prefix], a long time ago, there was a young named Luke
+  Skywalker. He was a good pilot and a good fighter. He was a good pilot.
+  <|im_end|> was a fictional character in Star Wars: The End.[suffix]
 ```
 
 The 3B gets the facts right where the 135M does not.

@@ -22,5 +22,5 @@ anneal_steps: 4_000
 log_steps: 25
 save_steps: 500
 sample_steps: 1_000
-out_dir: "runs/smollm2-135m"
+out_dir: "runs/smollm2-135m-testing"
 seed: 0

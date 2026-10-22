@@ -82,7 +82,9 @@ def token_tensor(text: str) -> torch.Tensor:
 
 
 x = torch.full((1, args.length), mask_id, dtype=torch.long, device=device)
-bos = torch.tensor([[tokenizer.bos_token_id]], dtype=torch.long).to(device)
+# Smollm2 has bos_token: '<|endoftext|>' (0) and eos_token: '<|endoftext|>' (0)
+# Smollm3 has eos_token: '<|im_end|>' (128012)
+bos = torch.tensor([[tokenizer(" ")]], dtype=torch.long).to(device)
 
 truth: torch.Tensor | None = None
 
@@ -147,9 +149,7 @@ with viewer if args.viewer else live:
             dist = probs
 
         conf_all = conf.clone()
-        x_shift = x[:, 1:]
-        is_mask = x_shift == mask_id
-
+        is_mask = x[:, 1:] == mask_id
         conf = conf[:, :-1].masked_fill(~is_mask, -float("inf"))
         score = conf + torch.rand_like(conf) * 1e-3
 

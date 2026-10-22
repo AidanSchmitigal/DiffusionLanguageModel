@@ -112,8 +112,8 @@ def diffusion_loss(
 ) -> torch.Tensor:
     """
     Weighted cross-entropy on masked positions only.
-    The loss is a sum over masked positions of CE/t
-    Shifts the logits right 1
+    The loss is a sum over masked positions of CE/t, normalised by the total
+    number of masked tokens.
 
     logits: (B, T, V) model output.
     x_0: (B, T) clean tokens.
