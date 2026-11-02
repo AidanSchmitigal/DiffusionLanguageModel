@@ -11,6 +11,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenize
 from src.models import MODELS
 
 
+BATCH_CHUNK = 256
+
+
 def expand_batch(
     model: torch.nn.Module,
     contexts: list[list[int]],
@@ -18,15 +21,19 @@ def expand_batch(
     device: torch.device,
 ) -> list[list[tuple[int, float]]]:
     """Return, for each context, the top-k (token_id, prob) continuations."""
-    ids = torch.tensor(contexts, dtype=torch.long, device=device)
-    with torch.no_grad():
-        logits = model(input_ids=ids).logits[:, -1, :]
-    probs = logits.float().softmax(dim=-1)
-    top = probs.topk(top_k, dim=-1)
-    return [
-        list(zip(top.indices[i].tolist(), top.values[i].tolist()))
-        for i in range(ids.shape[0])
-    ]
+    results: list[list[tuple[int, float]]] = []
+    for start in range(0, len(contexts), BATCH_CHUNK):
+        chunk = contexts[start : start + BATCH_CHUNK]
+        ids = torch.tensor(chunk, dtype=torch.long, device=device)
+        with torch.no_grad():
+            logits = model(input_ids=ids, logits_to_keep=1).logits[:, -1, :]
+        probs = logits.float().contiguous().softmax(dim=-1)
+        top = probs.topk(top_k, dim=-1)
+        results.extend(
+            list(zip(top.indices[i].tolist(), top.values[i].tolist()))
+            for i in range(ids.shape[0])
+        )
+    return results
 
 
 def build_tree(

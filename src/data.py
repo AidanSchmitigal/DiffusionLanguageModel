@@ -85,23 +85,72 @@ class PackedTokenDataset(Dataset[torch.Tensor]):
         return self.blocks[idx]
 
 
-def q_sample(x_0: torch.Tensor, noise: torch.Tensor, mask_id: int):
+def q_sample(
+    x_0: torch.Tensor,
+    noise: torch.Tensor,
+    mask_id: int,
+    *,
+    generator: torch.Generator | None = None,
+):
     """
-    x_0: batch, seq_len
-    noise: batch, 1
+    forward process of noising the data
+
+    The paper (2410.17891) uses
+    `q(x_t|x_0) = alpha_t*x_0 + (1-alpha_t)*m`
+    with alpha_t = 1-t,
+    and allows a sample to end up with zero masked tokens
+
+    x_0: (B, T_seqlen) clean tokens
+    noise: (B, 1) per-example noise level t
     """
 
-    rand = torch.rand_like(x_0, dtype=torch.float32)
+    rand = torch.rand(x_0.shape, dtype=torch.float32, generator=generator).to(x_0.device)
+
     mask = rand < noise
 
-    # put one mask in every sample
-    min_indices = rand.argmin(dim=1, keepdim=True)
-    mask = mask.scatter(dim=1, index=min_indices, value=True)
+    # # put one mask in every sample
+    # min_indices = rand.argmin(dim=1, keepdim=True)
+    # mask = mask.scatter(dim=1, index=min_indices, value=True)
 
     x_t = x_0.clone()
     x_t[mask] = mask_id
 
     return x_t, mask
+
+
+def masked_ce_parts(
+    logits: torch.Tensor,
+    x_0: torch.Tensor,
+    mask: torch.Tensor,
+):
+    """
+    Cross-entropy on masked positions only
+    shift (logits[:, i] predicts x_0[:, i+1])
+
+    logits: (B, T, V) model output.
+    x_0: (B, T) clean tokens.
+    mask: (B, T) bool, True at masked positions.
+    t: (B, 1) noise level used to build `mask`.
+
+    Returns (ce_sum_per_sample, n_masked_per_sample)
+    ce_sum_per_sample is the sum of CE over that sample's masked positions.
+    """
+
+    shift_logits = logits[:, :-1, :]
+    shift_x_0 = x_0[:, 1:]
+    shift_mask = mask[:, 1:]
+
+    B, T, V = shift_logits.shape
+
+    ce = F.cross_entropy(
+        shift_logits.reshape(-1, V),
+        shift_x_0.reshape(-1),
+        reduction="none",
+    ).view(B, T)
+
+    masked_ce = ce.masked_fill(~shift_mask, 0.0)
+
+    return masked_ce.sum(dim=-1), shift_mask.sum(dim=-1)
 
 
 def diffusion_loss(
@@ -121,21 +170,39 @@ def diffusion_loss(
     t: (B, 1) noise level used to build `mask`.
     """
 
-    shift_logits = logits[:, :-1, :]
-    shift_x_0 = x_0[:, 1:]
-    shift_mask = mask[:, 1:]
+    ce_sum, n_masked = masked_ce_parts(logits, x_0, mask)
 
-    B, T, V = shift_logits.shape
+    return (ce_sum.unsqueeze(-1) / noise).sum() / n_masked.sum()
 
-    ce = F.cross_entropy(
-        shift_logits.reshape(-1, V),
-        shift_x_0.reshape(-1),
-        reduction="none",
-    ).view(B, T)
 
-    masked_ce = ce.masked_fill(~shift_mask, 0.0)
+def diffusion_loss_parts(
+    logits: torch.Tensor,
+    x_0: torch.Tensor,
+    mask: torch.Tensor,
+    noise: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Returns (optimized_loss, unweighted_loss).
 
-    return (masked_ce.sum(dim=-1, keepdim=True) / noise).sum() / shift_mask.sum()
+    `optimized_loss` is the reference objective (aka `diffusion_loss`).
+    `unweighted_loss` is the same quantity without the 1/t weighting, i.e.
+    the mean cross entropy per masked token.
+    """
+
+    ce_sum, n_masked = masked_ce_parts(logits, x_0, mask)
+
+    total = n_masked.sum()
+    optimized = (ce_sum.unsqueeze(-1) / noise).sum() / total
+    unweighted = ce_sum.sum() / total
+
+    return optimized, unweighted
+
+
+def anneal_ratio(step: int, cfg: Config) -> float:
+    if cfg.anneal_steps <= 0:
+        return 1.0
+
+    return min(1.0, (step + 1) / cfg.anneal_steps)
 
 
 def anneal_width(step: int, cfg: Config) -> float:

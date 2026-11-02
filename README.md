@@ -35,16 +35,16 @@ I need `[MASK]` tokens to be replaced with the correct text. We run it on a full
 2. **Let attention look right.** Remove the causal mask so every position can see the whole block.
 3. **Fine-tune on a mask-and-recover objective** (the MDLM ELBO).
 
-The removal of the causal mask needs to be done gradually. We anneal the right-context width from 0 to the full sequence length.
+The removal of the causal mask needs to be done gradually. We anneal the right-context width from 0 to the full sequence length. Plus a bit of randomeness that increases over the whole annealing duration.
 
 Position `i` may attend to `j` iff `j <= i + w`:
 
 ```
-w = 0          w = 2              w >= L-1
-  1 . . .       1 1 . .         1 1 1 1
-  1 1 . .       1 1 1 .         1 1 1 1
-  1 1 1 .       1 1 1 1         1 1 1 1
-   causal       local + future    fully bidirectional
+ratio = 0          ratio = 0.5                 ratio = 1
+  1 . . . . .       1 1 . . 1 .             1 1 1 1 1 1
+  1 1 . . . .       1 1 1 . . 1             1 1 1 1 1 1
+  1 1 1 . . .       1 1 1 1 . .             1 1 1 1 1 1
+   causal          causal + random cells      fully bidirectional
 ```
 
 ## Files:
@@ -52,13 +52,14 @@ w = 0          w = 2              w >= L-1
 - `src/models.py`: Defines the models I want to try.
 - `src/train.py`: Training code.
 - `src/sample.py`: Sampling from a checkpoint.
+- `src/eval_per_t.py`: Per-noise-level evaluation.
 - `src/diffusion_view.py`: Interactive terminal viewer for the denoising steps.
 - `src/benchmark.py`: Simple get tps of a model.
 - `src/util.py`: Utility functions.
 - `src/config.py`: Configuration.
 - `src/data.py`: Data loading.
 - `src/mask.py`: Mask token setup.
-- `src/bidirectional.py`: Bidirectional attention.
+- `src/bidirectional.py`: Bidirectional attention and the annealing masks.
 
 ## Config
 
@@ -78,44 +79,15 @@ python -m src.sample --model runs/smollm3-3b --length 25 --prefix "Water boils a
 python -m src.sample --model runs/smollm3-3b --length 96 --prefix "The history of the printing press begins with" --suffix " and ends, for now, with the internet." --steps 256
 ```
 
-### Viewer
-
-`--viewer` opens an interactive trace of the denoising process. Every token is a
-stack of rows:
-
-```
-│  the   │  row 1: the token currently in the sequence
-│  cat   │  row 2: what the model predicts for that position at this step
-│ ██████ │  row 3: confidence of that prediction
-│  the   │  row 4: the original sample token (green = match, red = mismatch)
-```
-
-Row 4 is only shown when there is a ground truth to compare against, i.e. when
-`--noise-sample` is used. The line under the header then reports how much of
-the original sample the model reproduced (`match 90.9%  20/22 correct`).
-
-```bash
-python -m src.sample --model runs/smollm3-3b --viewer \
-  --noise-sample "The history of the printing press begins with Gutenberg in Mainz and ends, for now, with the internet." \
-  --noise-amount 0.3 --length 48 --steps 24
-```
-
-Keys: `←/→` previous/next step, `↑/↓` move the cursor one row, `,`/`.` one
-token, `f` jump to the next token filled on this step, `g`/`G` first/last step,
-`q` quit. Every step is recorded, so you can walk backwards and forwards.
-
 ## Training models
 
-### SmolLM2-135M
+### SmolLM2-135M main
 
-**22,850 steps, 93.6M tokens, 11.0h on M1 Max**
+**40,000 steps, 163.8M tokens, 19.5h on an M1 Max.**
 
-~2,360 tok/s. Uses fineweb-edu. Target was 160,000 steps, which would have
-taken ~66 more hours.
+~2,300 tok/s. Uses fineweb-edu
 
-#### The plateau
-
-Training loss went **14.96 -> 9.31**.
+Training loss fell **14.96 -> 9.31**.
 
 | steps | 0-2k  | 2-4k | 4-6k | 6-8k | 8-10k | 10-12k | 12-14k | 14-16k | 16-18k | 18-20k | 20-22k | 22-24k |
 | ----- | ----- | ---- | ---- | ---- | ----- | ------ | ------ | ------ | ------ | ------ | ------ | ------ |
@@ -128,33 +100,23 @@ Training loss went **14.96 -> 9.31**.
 | 400      | 2.068  | 2.455  | 2.516 | 3.044 | 4.266 | 7.590 |
 | 600      | 2.141  | 2.681  | 2.784 | 2.941 | 4.213 | 7.596 |
 
-| t bucket | % of samples | % of reported loss | change in reported loss |
-| -------- | ------------ | ------------------ | ----------------------- |
-| 0.0-0.1  | 9.5%         | 5.4%               | -0.022                  |
-| 0.1-0.25 | 14.9%        | 9.6%               | -0.032                  |
-| 0.25-0.5 | 25.3%        | 21.1%              | -0.052                  |
-| 0.5-1.0  | 50.2%        | 63.9%              | -0.099                  |
+Trained with the band attention anneal.
+The anneal completed at step 2,000
 
-Comparing against the _causal_ SmolLM2-135M base on held-out blocks (last 5%
-of the stream, never trained on). The AR model's next-token CE is **2.936
-nats**.
+It is better than the causal base model (2.936 nats next-token CE) while fewer than about 20% of tokens are hidden. At higher noise there is too little visible context
+for a 135M model to reconstruct the sequence. The `t=1` result is only 0.094
+nats worse than the no-context unigram floor, which is the expected saturated
+end of the curve.
 
-| t    | AR base CE | diffusion CE | ppl  | top-1 | vs AR     |
-| ---- | ---------- | ------------ | ---- | ----- | --------- |
-| 0.01 | 2.936      | 2.455        | 11.7 | 56.0% | **-0.48** |
-| 0.02 | 2.936      | 2.489        | 12.1 | 57.9% | **-0.45** |
-| 0.05 | 2.936      | 2.576        | 13.1 | 55.3% | **-0.36** |
-| 0.10 | 2.936      | 2.750        | 15.6 | 53.1% | **-0.19** |
-| 0.20 | 2.936      | 3.073        | 21.6 | 48.7% | +0.14     |
-| 0.30 | 2.936      | 3.479        | 32.4 | 43.6% | +0.54     |
-| 0.50 | 2.936      | 4.364        | 78.6 | 32.1% | +1.43     |
-| 0.70 | 2.936      | 5.489        | 242  | 19.9% | +2.55     |
-| 0.90 | 2.936      | 6.735        | 841  | 8.8%  | +3.80     |
-| 1.00 | 2.936      | 7.583        | 1965 | 3.7%  | +4.65     |
-
-The diffusion model beats the AR model at every `t < ~0.15`, which is
-exactly what it should do, because it can see context on both sides. It
-crosses over around `t = 0.15` and degrades from there.
+| masked fraction `t` | CE (nats) | perplexity | vs. AR base |
+| ------------------- | --------: | ---------: | ----------: |
+| 1%                  |     2.313 |       10.1 |      -0.623 |
+| 5%                  |     2.464 |       11.7 |      -0.472 |
+| 10%                 |     2.631 |       13.9 |      -0.305 |
+| 20%                 |     2.956 |       19.2 |      +0.020 |
+| 50%                 |     4.303 |       73.9 |      +1.367 |
+| 80%                 |     6.033 |      417.1 |      +3.097 |
+| 100%                |     7.559 |     1917.7 |      +4.623 |
 
 #### Samples
 

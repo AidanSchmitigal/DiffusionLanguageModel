@@ -1,0 +1,33 @@
+# Main training run.
+# full cosine over 40,000 steps
+spec: "smollm2-135m"
+
+# --- data ---
+dataset: "HuggingFaceFW/fineweb-edu"
+dataset_config: "sample-10BT"
+seq_len: 256
+max_docs: 120_000
+batch_size: 16
+
+# --- optimisation ---
+steps: 40_000
+lr: 2.0e-4
+warmup_steps: 400
+weight_decay: 0.01
+grad_clip: 1.0
+
+# --- attention annealing ---
+anneal_steps: 2_000
+anneal_mode: "band"
+
+# --- evaluation ---
+eval_every: 2_000
+eval_blocks: 512
+eval_batches: 120
+
+# --- runtime ---
+log_steps: 25
+save_steps: 500
+sample_steps: 1_000
+out_dir: "runs/smollm2-135m-main"
+seed: 42

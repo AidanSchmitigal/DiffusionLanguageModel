@@ -1,0 +1,32 @@
+# smoke woo
+spec: "smollm2-135m"
+
+# --- data ---
+dataset: "HuggingFaceFW/fineweb-edu"
+dataset_config: "sample-10BT"
+seq_len: 256
+max_docs: 120_000
+batch_size: 16
+
+# --- optimisation ---
+steps: 20
+lr: 2.0e-4
+warmup_steps: 5
+weight_decay: 0.01
+grad_clip: 1.0
+
+# --- attention annealing ---
+anneal_steps: 10
+anneal_mode: "paper"
+
+# --- evaluation ---
+eval_blocks: 64
+eval_every: 10
+eval_batches: 4
+eval_t_grid: [0.01, 0.1, 0.5, 1.0]
+
+log_steps: 5
+save_steps: 20
+sample_steps: 1_000
+out_dir: "runs/smoke-paper"
+seed: 0

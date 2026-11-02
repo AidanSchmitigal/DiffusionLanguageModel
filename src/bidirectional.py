@@ -7,6 +7,17 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from transformers.models.llama.modeling_llama import ALL_ATTENTION_FUNCTIONS, LlamaDecoderLayer
 
+from config import Config
+from models import ModelSpec
+from src.data import (
+    PackedTokenDataset,
+    anneal_ratio,
+    anneal_width,
+    build_token_stream,
+    diffusion_loss_parts,
+    q_sample,
+)
+
 
 def make_bidirectional(model: PreTrainedModel):
     """
@@ -46,6 +57,29 @@ def make_bidirectional(model: PreTrainedModel):
     model.config.is_causal = False
 
 
+def anneal_attn_paper(
+    seq_len: int,
+    *,
+    device: torch.device,
+    ratio: float,
+) -> torch.Tensor:
+    """
+    The paper's implementation's attention mask annealing.
+
+    Each cell is independently selected with probability `ratio`
+    Returns a 4D additive float mask (0 = attend, finfo.min = blocked),
+    broadcast over the batch.
+    """
+
+    idx = torch.arange(seq_len, device=device)
+    causal = idx.unsqueeze(0) <= idx.unsqueeze(1)  # [i, j] -> j <= i
+
+    random_open = torch.rand((seq_len, seq_len), device=device) < ratio
+    attend = causal | random_open
+
+    return attend
+
+
 def attention_mask_band(
     seq_len: int,
     *,
@@ -69,3 +103,28 @@ def attention_mask_band(
     thick_diagonal[sets] = True
 
     return thick_diagonal
+
+
+def build_attn_mask(cfg: Config, device: torch.Device, spec: ModelSpec, step: int):
+    """
+    make the attention mask based on the config setting
+    """
+
+    ratio = anneal_ratio(step, cfg)
+    # if cfg.anneal_mode == "paper":
+    #     mask = anneal_attn_paper(cfg.seq_len, device=device, ratio=ratio)
+    #     width = None
+
+    if cfg.anneal_mode == "band":
+        width = anneal_width(step, cfg)
+        mask = attention_mask_band(cfg.seq_len, device=device, width=width)
+        if mask is None:
+            return None, ratio, width
+
+    else:
+        raise ValueError(f"unknown anneal_mode {cfg.anneal_mode!r}")
+
+    mask = torch.zeros(mask.shape, dtype=spec.dtype, device=mask.device)
+    mask.masked_fill_(~mask, torch.finfo(spec.dtype).min)
+
+    return mask.unsqueeze(0).unsqueeze(0), ratio, width

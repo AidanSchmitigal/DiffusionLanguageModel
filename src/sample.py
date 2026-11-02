@@ -48,10 +48,10 @@ args = Args.from_argparse(ap.parse_args())
 
 torch.manual_seed(args.seed)
 
-device = torch.device("mps")
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
 config_path = Path(args.model) / "config.json"
-cfg = Config.load(config_path)
+cfg = Config.load_run(config_path)
 
 spec = MODELS[cfg.spec]
 
@@ -84,7 +84,7 @@ def token_tensor(text: str) -> torch.Tensor:
 x = torch.full((1, args.length), mask_id, dtype=torch.long, device=device)
 # Smollm2 has bos_token: '<|endoftext|>' (0) and eos_token: '<|endoftext|>' (0)
 # Smollm3 has eos_token: '<|im_end|>' (128012)
-bos = torch.tensor([[tokenizer(" ")]], dtype=torch.long).to(device)
+bos = token_tensor(" ")
 
 truth: torch.Tensor | None = None
 

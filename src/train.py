@@ -26,8 +26,16 @@ from torch.utils.data import DataLoader
 from src.config import Config
 from src.models import MODELS
 from src.mask import add_mask_token
-from src.bidirectional import attention_mask_band, make_bidirectional
-from src.data import PackedTokenDataset, anneal_width, build_token_stream, diffusion_loss, q_sample
+from src.bidirectional import anneal_attn_mask, attention_mask_band, build_attn_mask, make_bidirectional, to_additive_mask
+from src.data import (
+    PackedTokenDataset,
+    anneal_ratio,
+    anneal_width,
+    build_token_stream,
+    diffusion_loss_parts,
+    q_sample,
+)
+from src.eval_per_t import eval_per_t, unigram_ce
 
 
 class Args(TypedArgs):
@@ -48,6 +56,9 @@ log_path = out / "train_log.jsonl"
 
 with open(out / "config.json", "w") as f:
     json.dump(asdict(cfg), f, indent=2, default=str)
+
+with open(log_path, "w") as f:
+    f.write("")
 
 random.seed(cfg.seed)
 torch.manual_seed(cfg.seed)
@@ -75,15 +86,20 @@ print(f"base: {spec.hf_id}, params: {n_params / 1e6:.1f}M, mask_id: {mask_id}")
 
 stream = build_token_stream(tokenizer, cfg)
 dataset = PackedTokenDataset(stream, seq_len=cfg.seq_len)
+
+n_eval = min(cfg.eval_blocks, max(1, len(dataset) // 10))
+train_dataset = dataset[: len(dataset) - n_eval]
+eval_block_tensor = dataset.blocks[len(dataset) - n_eval :]
+
 dataloader = DataLoader(
-    dataset,
+    train_dataset,
     batch_size=cfg.batch_size,
     shuffle=True,
     drop_last=True,
     num_workers=0,
     pin_memory=False,
 )
-print(f"data: {len(stream) / 1e6:.1f}M tokens -> {len(dataset)} blocks of {cfg.seq_len}")
+print(f"data: {len(stream) / 1e6:.1f}M tokens -> {len(dataset)} blocks of {cfg.seq_len}, ({len(train_dataset)} train, {n_eval} held out for eval)")
 
 # optimizer
 
@@ -114,9 +130,13 @@ def lr_at(step: int) -> float:
 step = 0
 start = time.time()
 running: list[float] = []
+running_unweighted: list[float] = []
 
-print(f"\ntraining for {cfg.steps} steps (anneal over {cfg.anneal_steps})\n")
-header = f"{'step':>8} {'loss':>8} {'width':>8} {'lr':>8} {'tok/s':>8}"
+#! ---------
+unigram = unigram_ce(eval_block_tensor, model.config.vocab_size)
+
+print(f"\ntraining for {cfg.steps} steps (anneal over {cfg.anneal_steps}, mode {cfg.anneal_mode})\n")
+header = f"{'step':>8} {'loss':>8} {'unweighted':>10} {'anneal':>8} {'lr':>8} {'tok/s':>8}"
 print(header)
 print("-" * len(header))
 
@@ -135,17 +155,16 @@ while not done:
             g["lr"] = cfg.lr * lr_at(step)
 
         # noise
-        noise = torch.rand(x_0.shape[0], 1, device=device).clamp(min=1e-3, max=1.0)
-        x_t, mask = q_sample(x_0, noise, mask_id)
+        while True:
+            noise = torch.rand(x_0.shape[0], 1, device=device).clamp(min=cfg.t_min, max=1.0)
+            x_t, mask = q_sample(x_0, noise, mask_id)
+            if int(mask.sum()) > 0:
+                break
 
-        width = anneal_width(step, cfg)
-
-        attention_mask = attention_mask_band(cfg.seq_len, device=device, width=width)
-        if attention_mask is not None:
-            attention_mask = attention_mask.unsqueeze(0).unsqueeze(0)
+        attention_mask, ratio, width = build_attn_mask(cfg, device, spec, step)
 
         logits = model(input_ids=x_t, use_cache=False, attention_mask=attention_mask).logits
-        loss = diffusion_loss(logits, x_0, mask, noise)
+        loss, unweighted_loss = diffusion_loss_parts(logits, x_0, mask, noise)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -153,21 +172,29 @@ while not done:
         optimizer.step()
 
         running.append(loss.item())
+        running_unweighted.append(unweighted_loss.item())
         step += 1
 
         if step == 1 or step % cfg.log_steps == 0:
             avg = sum(running[-cfg.log_steps :]) / min(len(running), cfg.log_steps)
+            avg_unweighted = sum(running_unweighted[-cfg.log_steps :]) / min(len(running_unweighted), cfg.log_steps)
             el = time.time() - start
 
             tps = step * cfg.batch_size * cfg.seq_len / max(el, 1e-9)
 
-            print(f"{step:>8} {avg:>8.4f} {width:>8.1f} {cfg.lr * lr_at(step):>8.2e} {tps:>8.0f}", flush=True)
+            print(
+                f"{step:>8} {avg:>8.4f} {avg_unweighted:>10.4f} {ratio:>8.4f} {cfg.lr * lr_at(step):>8.2e} {tps:>8.0f}",
+                flush=True,
+            )
             with open(log_path, "a") as f:
                 f.write(
                     json.dumps(
                         {
                             "step": step,
                             "loss": avg,
+                            "unweighted_loss": avg_unweighted,
+                            "anneal_mode": cfg.anneal_mode,
+                            "anneal_ratio": ratio,
                             "width": width,
                             "lr": cfg.lr * lr_at(step),
                             "tok_per_s": tps,
@@ -176,6 +203,31 @@ while not done:
                     + "\n"
                 )
             running = []
+            running_unweighted = []
+
+        if cfg.eval_every > 0 and step % cfg.eval_every == 0:
+            results = eval_per_t(
+                model,
+                eval_block_tensor,
+                cfg,
+                mask_id=mask_id,
+                device=device,
+                unigram=unigram,
+            )
+            with open(log_path, "a") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "kind": "eval",
+                            "step": step,
+                            "anneal_ratio": ratio,
+                            "per_t": [asdict(r) for r in results],
+                        }
+                    )
+                    + "\n"
+                )
+            summary = "  ".join(f"t={r.t}:{r.ce_mean:.3f}" for r in results)
+            print(f"{'eval':>8} {summary}", flush=True)
 
         if step % cfg.save_steps == 0 or step == cfg.steps:
             sd = model.state_dict()
